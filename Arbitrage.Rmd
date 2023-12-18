@@ -1,0 +1,354 @@
+---
+title: "Crypto pairs trading on dYdX using cointegration, Kalman filters and Copulas"
+author: "Ebuka Osuji"
+date: "10/22/2023"
+format: 
+  html:
+    code-fold: true
+---
+
+## Prepare Data
+```{r, message=FALSE}
+library(tidyverse)
+library(egcm)
+library(xts)
+library(zoo)
+
+csv_file <- "./dydx.csv"
+prices <- read.csv(csv_file)
+
+prices$Date <- as.POSIXct(prices$Date, format = "%Y-%m-%dT%H:%M:%S.000Z")
+prices <- xts(prices[, -1], order.by = prices$Date)
+rownames(prices) <- prices$Date
+prices$Date <- NULL  
+
+
+# log_returns<- diff(log(prices), lag = 1)
+
+log_prices<- log(prices)
+
+log_prices <- na.omit(log_prices)
+log_prices <- log_prices[, !colnames(log_prices) %in% c("Lunausd")]
+
+
+tokens = names(log_prices)
+tokens = tokens[tokens != "Ethusd"]
+tokens = tokens[tokens != "Lunausd"]
+
+
+columns = c("token","correlation") 
+resultMatrix = data.frame(matrix(nrow = 0, ncol = length(columns))) 
+colnames(resultMatrix) = columns
+
+```
+
+## Visualize correlation between log-prices of tokens
+```{r, message=FALSE}
+cor_mat <- cor(log_prices, method = "kendall")
+corrplot::corrplot(cor_mat,order="alphabet", tl.col = "black")
+```
+## Select cointegrated tokens
+
+```{r , message=FALSE}
+for (key in tokens) {
+  raw_data = log_prices[,key]
+  result = cor.test(log_prices$Ethusd,raw_data, method="kendall")
+  cointegration_test <- egcm(log_prices$Ethusd, raw_data,p.value = 0.05)
+  coint_result = is.cointegrated(cointegration_test)
+  if (coint_result) {
+    resultMatrix[nrow(resultMatrix) + 1,] <- list(key,result$estimate)
+  }
+}
+
+resultMatrix = resultMatrix |> arrange(desc(correlation))
+first_token = resultMatrix[1,]
+first_token_key = first_token[["token"]]
+
+filtered_log_prices = log_prices[,c("Ethusd",first_token_key)]
+T <- nrow(filtered_log_prices)
+plot(filtered_log_prices, legend.loc = "topleft", main = "DYDX log-prices")
+```
+
+## Install Kalman filter library
+```{r , message=FALSE}
+library(KFAS)
+
+```
+
+## Do the rest
+
+```{r, message=FALSE}
+estimate_mu_gamma_Kalman <- function(Y) {
+  T <- nrow(Y)
+  # init empty variables
+  gamma_Kalman_filtering <- mu_Kalman_filtering <- xts(rep(NA, T), index(Y))
+  colnames(mu_Kalman_filtering) <- "mu-Kalman"
+  colnames(gamma_Kalman_filtering) <- "gamma-Kalman"
+  # Kalman parameters
+  Tt <- diag(2)
+  Rt <- diag(2)
+  Qt <- 1e-5*diag(2)  # state transition variance very small
+  Zt <- array(as.vector(t(cbind(1, as.matrix(Y[, 2])))), dim = c(1, 2, T))  # time-varying
+  Ht <- matrix(1e-3)  # observation variance
+  # the prior in the code: P1cov = kappa*P1Inf + P1, kappa = 1e7
+  init <- estimate_mu_gamma_LS(Y)
+  a1 <- matrix(c(init$mu[1], init$gamma[1]), 2, 1)
+  P1 <- 1e-5*diag(2)  # variance of initial point
+  P1inf <- 0*diag(2)
+  # create Kalman model
+  model <- SSModel(as.matrix(Y[, 1]) ~ 0 + SSMcustom(Z=Zt, T=Tt, R=Rt, Q=Qt, a1=a1, P1=P1, P1inf=P1inf), H=Ht)
+  # run Kalman filtering
+  out <- KFS(model)
+  
+  mu_Kalman_filtering[] <- out$a[-1, 1]  # a is Kalman filtering (alphahat is Kalman smoothing) (a(T+1)=alphahat(T))
+  gamma_Kalman_filtering[] <- out$a[-1, 2]
+  # smoothing
+  L <- 30
+  
+  
+  mu_Kalman_filtering[] <- stats::filter(as.ts(mu_Kalman_filtering), rep(1, L)/L, sides = 1)
+  mu_Kalman_filtering <- na.locf(mu_Kalman_filtering, fromLast = TRUE)
+  gamma_Kalman_filtering[] <- stats::filter(as.ts(gamma_Kalman_filtering), rep(1, L)/L, sides = 1)
+  gamma_Kalman_filtering <- na.locf(gamma_Kalman_filtering, fromLast = TRUE)
+  return(list(mu = mu_Kalman_filtering, gamma = gamma_Kalman_filtering))
+}
+estimate_mu_gamma_LS <- function(Y, pct_training = 0.3) {
+  T <- nrow(Y)
+  T_trn <- round(pct_training*T)
+  # LS regression
+  ls_coeffs <- coef(lm(Y[1:T_trn, 1] ~ Y[1:T_trn, 2]))
+  mu <- xts(rep(ls_coeffs[1], T), index(Y))
+  colnames(mu) <- "mu-LS"
+  gamma <- xts(rep(ls_coeffs[2], T), index(Y))
+  colnames(gamma) <- "gamma-LS"
+  return(list(mu = mu, gamma = gamma))
+}
+
+
+
+LS <- estimate_mu_gamma_LS(filtered_log_prices)
+Kalman <- estimate_mu_gamma_Kalman(filtered_log_prices)
+
+# plots
+par(mfrow = c(2, 1))
+{ plot(cbind(LS$mu,  Kalman$mu), 
+       legend.loc = "left", main = "Tracking of mu")
+  addEventLines(xts("", index(filtered_log_prices[round(0.3*nrow(filtered_log_prices))])), lwd = 2, col = "blue") }
+{ plot(cbind(LS$gamma,  Kalman$gamma), 
+       legend.loc = "left", main = "Tracking of gamma")
+  addEventLines(xts("", index(filtered_log_prices[round(0.3*nrow(filtered_log_prices))])), lwd = 2, col = "blue") }
+
+
+compute_spread <- function(Y, gamma, mu, name = NULL) {
+  w_spread <- cbind(1, -gamma)/cbind(1+gamma, 1+gamma)
+  spread <- rowSums(Y * w_spread) - mu/(1+gamma)
+  colnames(spread) <- name
+  return(spread)
+}
+
+
+spread_LS <- compute_spread(filtered_log_prices, LS$gamma, LS$mu, "LS")
+spread_Kalman <- compute_spread(filtered_log_prices, Kalman$gamma, Kalman$mu, "Kalman")
+
+# plots
+plot(cbind(spread_LS,  spread_Kalman), legend.loc = "topleft", main = "Spreads")
+
+library(TTR)
+
+generate_signal <- function(Z_score, threshold_long, threshold_short) {
+  signal <- Z_score
+  colnames(signal) <- "signal"
+  signal[] <- NA
+  
+  #initial position
+  signal[1] <- 0
+  if (Z_score[1] <= threshold_long[1]) {
+    signal[1] <- 1
+  } else if (Z_score[1] >= threshold_short[1])
+    signal[1] <- -1
+  
+  # loop
+  for (t in 2:nrow(Z_score)) {
+    if (signal[t-1] == 0) {  #if we were in no position
+      if (Z_score[t] <= threshold_long[t]) {
+        signal[t] <- 1
+      } else if(Z_score[t] >= threshold_short[t]) {
+        signal[t] <- -1
+      } else signal[t] <- 0
+    } else if (signal[t-1] == 1) {  #if we were in a long position
+      if (Z_score[t] >= 0) signal[t] <- 0
+      else signal[t] <- signal[t-1]
+    } else {  #if we were in a short position
+      if (Z_score[t] <= 0) signal[t] <- 0
+      else signal[t] <- signal[t-1]
+    }
+  }
+  return(signal)
+}
+generate_Z_score_EMA <- function(spread, n = 120) {
+  ## traditional rolling windowed mean and variance
+  # first, the mean
+  spread.mean <- EMA(spread, n)
+  spread.mean <- na.locf(spread.mean, fromLast = TRUE)
+  spread.demeaned <- spread - spread.mean
+  # second, the variance
+  spread.var <- EMA(spread.demeaned^2, n)
+  spread.var <- na.locf(spread.var, fromLast = TRUE)
+  # finally compute Z-score
+  Z.score <- spread.demeaned/sqrt(spread.var)
+  return(Z.score)
+}
+
+pairs_trading <- function(Y, gamma, mu, name = NULL, threshold = 0.7, plot = FALSE) {
+  # spread and spread portfolio
+  w_spread <- cbind(1, -gamma)/cbind(1+gamma, 1+gamma)
+  spread <- rowSums(Y * w_spread) - mu/(1+gamma)
+  
+  # Z-score
+  Z_score <- generate_Z_score_EMA(spread)
+  threshold_long <- threshold_short <- Z_score
+  threshold_short[] <- threshold
+  threshold_long[] <- -threshold
+  
+  # trading signal
+  signal <- generate_signal(Z_score, threshold_long, threshold_short)
+  
+  # combine the ref portfolio with trading signal
+  w_portf <- w_spread * lag(cbind(signal, signal))   # NOTE THE LAG!!
+  
+  # # fix the portfolio (gamma and mu) during a trade
+  # lag_signal <- as.numeric(lag(signal))
+  # for (t in 2:nrow(w_portf)) {
+  #   if (lag_signal[t] != 0 && lag_signal[t] == lag_signal[t-1])
+  #     w_portf[t, ] <- w_portf[t-1, ]
+  # }
+  
+  # now compute the PnL from the log-prices and the portfolio
+  X <- diff(Y)  #compute log-returns from log-prices
+  portf_return <- xts(rowSums(X * w_portf), index(X))
+  portf_return[is.na(portf_return)] <- 0
+  colnames(portf_return) <- name
+  
+  # plots
+  if (plot) {
+    tmp <- cbind(Z_score, signal)
+    colnames(tmp) <- c("Z-score", "signal")
+    par(mfrow = c(2, 1))
+    { plot(tmp, legend.loc = "topleft",
+           main = paste("Z-score and trading on spread based on", name))
+      lines(threshold_short, lty = 2)
+      print(lines(threshold_long, lty = 2)) }
+    print(plot(cumprod(1 + portf_return), main = paste("Cum P&L for spread based on", name)))
+  }
+  
+  return(portf_return)
+}
+
+return_LS <- pairs_trading(filtered_log_prices, LS$gamma, LS$mu, 
+                           "LS", plot = TRUE)
+
+return_Kalman <- pairs_trading(filtered_log_prices, Kalman$gamma, Kalman$mu, 
+                               "Kalman", plot = TRUE)
+
+plot(cumprod(1 + cbind(return_LS,  return_Kalman)), 
+     main = "Cum P&L", legend.loc = "topleft")
+```
+
+## Copulas
+
+``` {r, message=FALSE}
+#install copulas library
+library(VineCopula)
+```
+
+## Fit ECDF and generate uniform marginals using inverse transform sampling
+
+``` {r, message=FALSE}
+eth_prices = filtered_log_prices[,c("Ethusd")]
+first_token_prices = filtered_log_prices[,c(first_token_key)]
+
+eth_ecdf = ecdf(as.vector(eth_prices[,1]))
+first_token_ecdf = ecdf(as.vector(first_token_prices[,1]))
+
+uct = function(x) eth_ecdf(x)
+vct = function(x) first_token_ecdf(x)
+
+u = uct(as.vector(eth_prices[,1]))
+v = vct(as.vector(first_token_prices[,1]))
+
+marginals <- cbind(u, v)
+
+data <- as.copuladata(marginals)
+
+#visually select best fitting copula
+#fit <- BiCopCompare(data[, 1], data[, 2])
+```
+
+## Visualize copulas
+``` {r,message=FALSE}
+best_copula = BiCop(family = 5,par =  29.56)
+second_best_copula = BiCop(family = 2,par =  0.97, par2 = 5.97)
+third_best_copula = BiCop(family = 204,par =  5.83,par2 = 0.99)
+fourth_best_copula = BiCop(family = 104,par =  6.29,par2 = 0.98)
+
+plot(best_copula,type="surface", main="Frank" , xlab="Ethusd", ylab=first_token_key) 
+plot(second_best_copula,type="surface", main="Student-t" , xlab="Ethusd", ylab=first_token_key)
+plot(third_best_copula,type="surface", main="Tawn  type 2" , xlab="Ethusd", ylab=first_token_key)
+plot(fourth_best_copula,type="surface", main="Tawn  type 1" , xlab="Ethusd", ylab=first_token_key)
+```
+
+
+## Backtesting with Copulas
+``` {r,message=FALSE}
+u1 = data[,1]
+v1 = data[,2]
+
+
+equity_xts <- xts(order.by = index(prices))
+
+
+appendToSeries = function(copula_name,copula){
+  deriv1 = BiCopHfunc1(u1, v1, copula)
+  deriv2 = BiCopHfunc2(u1, v1, copula)
+  
+  P_U1_u1_given_U2_u2 <- deriv1
+  P_U2_u2_given_U1_u1 <- deriv2
+  
+  # Set the threshold values for generating trading signals
+  delta_plus <- 0.8
+  delta_minus <- 0.2
+  
+  position <- 0
+  equity <- vector("numeric", length = length(u1))
+  equity[1] <- 1  # Initial equity
+  names(equity) <- c(copula_name)
+  for (i in 2:length(u)) {
+    if (P_U1_u1_given_U2_u2[i] <= delta_minus && P_U2_u2_given_U1_u1[i] >= delta_plus) {
+      # Long the spread
+      position <- 1
+    } else if (P_U1_u1_given_U2_u2[i] >= delta_plus && P_U2_u2_given_U1_u1[i] <= delta_minus) {
+      # Short the spread
+      position <- -1
+    } else {
+      # No mispricing, exit position
+      position <- 0
+    }
+    
+    # Calculate equity based on position and asset returns
+    equity[i] <- equity[i - 1] + position * (exp(u[i]) - exp(u[i - 1]) - exp(v[i]) + exp(v[i - 1]))
+    
+    
+    
+  }
+  
+  equity_xts = cbind(equity_xts, equity)
+  return (equity_xts)
+}
+
+equity_xts = appendToSeries("Frank",best_copula)
+equity_xts = appendToSeries("Student-t",second_best_copula)
+equity_xts = appendToSeries("Tawn_type_2",third_best_copula)
+equity_xts = appendToSeries("Tawn_type_1",fourth_best_copula)
+colnames(equity_xts) <- c("Frank","Student-t","Tawn_type_2","Tawn_type_1")
+plot(equity_xts,  main = 'Cumulative returns', xlab = 'Time', ylab = 'Returns',legend.loc = "topleft",)
+```

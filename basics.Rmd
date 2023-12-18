@@ -1,0 +1,99 @@
+---
+title:"Basics"
+---
+
+```{R}
+data.aapl = util.load_data("AAPL.csv", "AAPL")
+util.head_tail(data.aapl)
+```
+
+
+```{R}
+data.btc = util.load_data("BTC-USD.csv", "BTC")
+util.head_tail(data.btc)
+```
+
+
+```{R}
+data.tsla = util.load_data("TSLA.csv", "TSLA")
+util.head_tail(data.tsla)
+```
+
+```{R}
+data.meta = util.load_data("META.csv", "META")
+util.head_tail(data.meta)
+```
+
+
+```{R}
+data.goog = util.load_data("GOOG.csv", "GOOG")
+util.head_tail(data.goog)
+```
+
+```{R}
+data.amzn = util.load_data("AMZN.csv", "AMZN")
+util.head_tail(data.amzn)
+```
+
+
+```{R}
+close.prc =  cbind(data.amzn$AMZN.Close, data.goog$GOOG.Close, data.aapl$AAPL.Close, data.meta$META.Close,data.tsla$TSLA.Close,data.btc$BTC.Close)
+names(close.prc) = c("AMZN", "GOOG", "AAPL", "META","TSLA","BTC")
+close.prc = na.omit(close.prc)
+util.head_tail(close.prc)
+```
+
+```{R}
+options(digits = 3)
+first_vals = close.prc[1,]
+norm.prc = sweep(close.prc, 2, first_vals, FUN="/")
+util.head_tail(norm.prc)
+
+```
+```{R}
+(y.range = range(norm.prc))
+dt = index(norm.prc)
+plot(x = dt,
+y = norm.prc$AMZN,
+xlab = "Date",
+ylab = "Value of Investment",
+ylim = y.range,
+type = "l",
+lwd=2,
+main = "Value of $1 Investment in AMZN, GOOG, AAPL, META, TSLA and BTC")
+lines(x = dt, y = norm.prc$GOOG, col = "blue")
+lines(x = dt, y = norm.prc$AAPL, col = "red")
+lines(x = dt, y = norm.prc$META, col = "darkgreen")
+lines(x = dt, y = norm.prc$TSLA, col = "pink")
+lines(x = dt, y = norm.prc$BTC, col = "orange")
+abline(h=1,lty=2)
+legend("topleft",
+c("AMZN", "GOOG","AAPL", "META","TSLA","BTC"), lwd=c(2,1,1,1,1,1),
+col = c("black", "blue", "red", "darkgreen","pink","orange"))
+```
+
+```{R}
+plot(norm.prc, ylim = y.range,
+
+lwd=2,
+
+main = "Value of $1 Investment in\n AMZN, GOOG, AAPL, META, TSLA and BTC",legend.loc = "topleft",)
+```
+
+
+
+```{R}
+#Moving averages
+ma_20d =  rollapply(data.btc$BTC.Close, 20, mean)
+ema_20d = EMA(data.btc$BTC.Close, n = 20)
+data = cbind(data.btc$BTC.Close, ma_20d, ema_20d)
+names(data) = c("Price", "MA_20", "EMA_20")
+data.2019 = data[1463:1827,]
+util.head_tail(data.2019)
+```
+
+```{R}
+dt = index(data.2019)
+(y.range = range(data.2019))
+plot(data.2019,main="BTC Price and 20−Day Moving Averages",legend.loc = "topleft",)
+```

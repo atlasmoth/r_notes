@@ -3,6 +3,7 @@ title : "Time series basics"
 ---
 
 ```{R}
+library("astsa")
 par(mfrow=2:1)
 w = rnorm(500) 
 v = filter(w, sides=2, filter=rep(1/3,3)) 

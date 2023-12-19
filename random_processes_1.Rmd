@@ -1,0 +1,263 @@
+---
+title : "Random processes 1"
+---
+
+```{R}
+#Ehrenfest urn model 
+diffe<-numeric()
+f<-numeric()
+nt<- 6
+ne<-nt/2;
+nsteps<- 500
+numberA <- 4
+ta<- 100
+tb<- 200
+nA<- numberA
+diffe0<- nA-ne
+i<-0
+
+while(i<nsteps){
+i<- i+1
+u<- sample(nt,1,1/nt)
+if(u<=nA) nA<-nA-1 else nA<-nA+1
+diffe[i]<-nA-ne
+f[i]<- diffe[i]^2    # function of (Delta n), now = (Delta n)^2
+}
+
+t<-c(0:nsteps)        # adding t=0
+diffe<- c(diffe0,diffe) 
+
+plot(t,diffe, type="l",ylim=c(-3,3),xlim=c(0,nsteps),main="",
+ylab=expression(italic(Delta*n)),xlab="time",cex.lab=1.3,font.lab=3)
+abline(h=0,lty=3,col="black",lwd=2)
+```
+
+```{R}
+#Ehrenfest multiple trajectories
+t <- 1000
+ne <- t / 2
+numberA <- seq(0, t)
+nsteps <- 5000
+nhist <- 1000
+splot <- 20
+diffe0 <- numeric()
+diffe <- matrix(, nhist, nsteps)  # to save each history
+f <- matrix(, nhist, nsteps)  # to save (Delta n)^2
+mstep <- 4000  # compute the ensemble average at step = mstep
+numberA <- seq(0, t)  # starting with any number of balls in A (0<= numberA <= t)
+
+# plot setup
+plot(t, type = "n", ylim = c(-500, 500), xlim = c(0, nsteps), main = "",
+     ylab = expression(Delta * n), xlab = "time", cex.lab = 1.3, font.lab = 3)
+
+for (l in 1:nhist) {
+  i <- 0
+  nA <- sample(numberA, 1)
+  diffe0[l] <- nA - ne
+  
+  while (i < nsteps) {
+    i <- i + 1
+    u <- sample(t, 1, 1 / t)
+    
+    if (u <= nA) {
+      nA <- nA - 1
+    } else {
+      nA <- nA + 1
+    }
+    
+    diffe[l, i] <- nA - ne
+    f[l, i] <- diffe[l, i]^2  # function of (Delta n), now = (Delta n)^2
+  }  # ending loop on steps
+}  # ending loop on histories
+
+t <- c(0:nsteps)  # adding t=0
+# adding to the matrix diffe a first column with the starting diffe
+diffe <- cbind(diffe0, diffe)
+
+for (l in 1:nhist) {
+  # to plot the histories from 1 to splot
+  if (l <= splot) lines(t, diffe[l, ], lty = 3)
+}
+
+segments(mstep, -500, mstep, +500, lty = 4, lwd = 2, col = "black")
+
+```
+
+
+```{R}
+#Poisson process
+Deltat<-3600
+lambda<-0.003
+nhistories<-4
+matr.history.t<-matrix(,nhistories,Deltat)
+t.max<- 50 
+lst<- numeric()
+t.exp<- numeric()
+t.arr<- numeric()
+for(l in 1:nhistories)      {          
+t.exp<- rexp(t.max,lambda) 
+# print(t.exp) # uncomment to print the generated arrival times
+t.arr<-c(0,cumsum(t.exp)) 
+length(t.arr)<- max(which(t.arr<Deltat)) + 1
+lst[l]<- length(t.arr) 
+matr.history.t[l,1:lst[l]] <- t.arr
+}
+ymax<- 12
+xmax<- 4000
+par(mfrow=c(2,2))
+plot(matr.history.t[1,1:lst[1]],0:(lst[1]-1),type="s",font.lab=3,
+xlab="time (s)",ylab="No. arrivals",ylim=c(0,ymax),
+xlim=c(0,xmax),cex.lab=1.)
+abline(v=Deltat,lty=3)
+plot(matr.history.t[2,1:lst[2]],0:(lst[2]-1),type="s",font.lab=3,
+xlab="time (s)",ylab="No. arrivals",ylim=c(0,ymax),
+xlim=c(0,xmax),cex.lab=1.)
+abline(v=Deltat,lty=3)
+plot(matr.history.t[3,1:lst[3]],0:(lst[3]-1),type="s",font.lab=3,
+xlab="time (s)",ylab="No. arrivals",ylim=c(0,ymax),
+xlim=c(0,xmax),cex.lab=1.)
+abline(v=Deltat,lty=3)
+plot(matr.history.t[nhistories,1:lst[nhistories]],0:(lst[nhistories]-1),
+type="s",xlab="time (s)",ylab="No. arrivals",ylim=c(0,ymax),font.lab=3,
+cex.lab=1.,xlim=c(0,xmax))
+abline(v=Deltat,lty=3)
+
+```
+
+
+
+```{R}
+#non-homogenous poisson process
+Deltat<- 60  # minutes
+lambda1<- 1.
+ev<-  0
+evt<- 0
+evs<- 0
+t<-   0
+while (t<Deltat) {      
+t<- t + rexp(1,lambda1)
+evt<- c(evt,t)  
+fl=sin(t)/lambda1   
+evs<- c(evs,fl) 
+if (runif(1) < fl) ev<- c(ev,t) 
+}       
+plot(evt,0:(length(evt)-1),type="s",ylim=c(-4,length(evt)),xlab="time (min)",
+ylab="No. arrivals",lty=3,col="black",cex.lab=1.1,font.lab=3,lwd=2)
+curve(sin(x),0,Deltat,add=T,lty=2,lwd=1.6)
+lines(ev,0:(length(ev)-1),type="s",lwd=2.2,col="black")
+```
+
+
+```{R}
+#Random walk
+p<- 0.5 
+nhists<- 100
+nsteps<- 200        
+x0<-0     
+splot<- 30
+start_matr<-matrix(x0,nhists,1)
+Sn<-matrix(,nhists,nsteps+1)
+y<-matrix(,nhists,nsteps)
+for (i in 1:nhists)          {  
+x<-rbinom(nsteps,1,p)
+x[which(x==0)]<- -1 
+y[i,]<-cumsum(x) 
+}
+Sn <- matrix(c(start_matr,y+x0),nhists,nsteps+1)  # adding the starting vector
+n<- seq(0, nsteps)          # time axis
+par(mai=c(1.02,1.,0.82,0.42)+0.1)
+plot (n,Sn[1,],xlab="number of steps",ylim=c(-40,40),type="l",lty=1,
+ylab=expression(italic("S"[n] )~~ italic((position)), ),
+cex.lab=1.2,font.lab=3,lwd=0.5,xaxt="none"   )
+axis(1, at=seq(0,nsteps,20))
+for (i in 2:splot)
+{
+   lines(Sn[i,],type="l",lty=1,lwd=0.5)
+}
+par(mai=c(1.02,1.,0.82,0.42)+0.1)
+hist(Sn[,nsteps+1],freq=F,main="",
+xlim=c(-50,50),font.lab=3,
+xlab=expression(italic("S"[n] )~~ italic((position)) ),
+cex.lab=1.2,font.lab=3)
+mSn<-mean(Sn[,nsteps+1])
+mSn
+VarSn<- var(Sn[,nsteps+1])
+VarSn
+se.Sn<- sqrt(var(Sn[,nsteps+1]))
+se.Sn
+curve (dnorm(x, mean=mSn, sd=se.Sn),lty=2,lwd=2,add=T)
+```
+
+```{R}
+#ARMA processes
+w <- rnorm(1000)
+plot(as.ts(w),ylab="White noise")
+acf(w,main="",lag=20,ylim=c(-0.2,1))
+w.spec <- spectrum(w,log="no",span=200,plot=FALSE)
+plot(w.spec$freq,w.spec$spec,t="l",ylim = c(0,1.2),
+xlab="frequency (cycles/sample interval)",ylab="spectral density")
+
+```
+
+
+
+```{R}
+w <- rnorm(100)
+x <- rep(0,100)
+x[1] <- w[1]
+for (t in 2:100) x[t] <- w[t] + 0.5*w[t-1]
+plot(as.ts(x),ylab="MA(1) process")
+acf(x,main="")
+x.spec <- spectrum(x,log="no",span=30,plot=FALSE)
+plot(x.spec$freq,x.spec$spec,t="l",ylim = c(0,3),
+  xlab="frequency (cycles/sample interval)", ylab="spectral density")
+```
+
+
+```{R}
+N <- 101
+t <- 0:(N-1)
+epsilon <- rnorm(N)
+
+phi <- 0.3
+Xs <- rep(0,N)
+for (i in 2:N) {
+Xs[i] <- phi*Xs[i-1] + epsilon[i]
+}
+
+phi <- 1.01
+X <- rep(0,N)
+for (i in 2:N) {
+X[i] <- phi*X[i-1] + epsilon[i]
+}
+
+plot(t,X,t="l")
+lines(t,Xs,col="red")
+
+#ARMA
+
+x.ARMA <- arima.sim(model = list(order=c(2,0,2), ar = c(0.5,-0.7),
+ma = c(0.2,-0.5)), n = 200)
+plot(x.ARMA,main="",ylab="time series")
+acf(x.ARMA,main="")
+pacf(x.ARMA,main="")
+```
+
+```{R}
+
+
+
+```
+
+```{R}
+
+```
+
+```{R}
+
+```
+
+
+```{R}
+
+```

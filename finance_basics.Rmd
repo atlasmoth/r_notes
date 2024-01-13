@@ -1,0 +1,143 @@
+---
+title : "Finance Basics"
+---
+
+```{R}
+par(mfrow = c(2, 2))  # define a 2x2 matrix of plots
+plot(cumsum(rnorm(1000)), type = "l", ylab = "x1")
+plot(cumsum(rnorm(1000)), type = "l", ylab = "x2")
+plot(cumsum(rnorm(1000)), type = "l", ylab = "x3")
+plot(cumsum(rnorm(1000)), type = "l", ylab = "x4")
+par(mfrow = c(1, 1))  # set it to default single plot
+
+
+
+```
+
+```{R}
+library(ggplot2)   # install.packages("ggplot2")
+library(reshape2)
+
+df <- data.frame(index   = 1:1000,
+                 series1 = cumsum(rnorm(1000)),
+                 series2 = cumsum(rnorm(1000)),
+                 series3 = cumsum(rnorm(1000)),
+                 series4 = cumsum(rnorm(1000)))
+molten_df <- melt(df, id.vars = "index", measure.vars = c("series1", "series2", "series3", "series4"))
+ggplot(molten_df, aes(x = index, y = value, col = variable)) + 
+  geom_line() +
+  ggtitle("Random walks")
+```
+
+```{R}
+ggplot(molten_df, aes(x = index, y = value, col = variable)) + 
+  geom_line(show.legend = FALSE) +
+  facet_wrap(~ variable) +
+  ggtitle("Random walks")
+
+```
+
+
+```{R}
+library(xts)
+
+data(sample_matrix)
+
+matrix_xts <- as.xts(sample_matrix, dateFormat = "Date")
+plot(matrix_xts$Close, main = "Stock prices")
+
+```
+
+```{R}
+library(xts)
+library(quantmod)
+
+# set begin-end date and stock namelist
+begin_date <- "2022-01-01"
+end_date <- "2023-12-31"
+stock_namelist <- c("AAPL", "AMD", "ADI",  "ABBV", "AEZS", "A",  "APD", "AA","CF")
+sector_namelist <- c(rep("Information Technology", 3), rep("Health Care", 3), rep("Materials", 3))
+
+data_set <- xts()
+for (stock_index in 1:length(stock_namelist))
+  data_set <- cbind(data_set, Ad(getSymbols(stock_namelist[stock_index], 
+                                            from = begin_date, to = end_date, auto.assign = FALSE)))
+colnames(data_set) <- stock_namelist
+indexClass(data_set) <- "Date"
+
+head(data_set)
+
+SP500_index <- Ad(getSymbols("^GSPC", from = begin_date, to = end_date, auto.assign = FALSE))
+colnames(SP500_index) <- "index"
+plot(SP500_index)
+
+```
+
+
+```{R}
+X <- diff(log(data_set), na.pad = FALSE)
+N <- ncol(X)  # number of stocks
+T <- nrow(X)  # number of days
+f <- diff(log(SP500_index), na.pad = FALSE)
+
+beta <- cov(X,f)/as.numeric(var(f))
+alpha <- colMeans(X) - beta*colMeans(f)
+sigma2 <- rep(NA, N)
+for (i in 1:N) {
+  eps_i <- X[, i] - alpha[i] - beta[i]*f
+  sigma2[i] <- (1/(T-2)) * t(eps_i) %*% eps_i
+}
+Psi <- diag(sigma2)
+Sigma <- as.numeric(var(f)) * beta %*% t(beta) + Psi
+library(corrplot) 
+corrplot(cov2cor(Sigma), mar = c(0,0,1,0), main = "Covariance matrix of log-returns from 1-factor model")
+
+```
+
+
+
+```{R}
+corrplot(cov2cor(Psi), mar = c(0,0,1,0), order = "hclust", addrect = 3, main = "Covariance matrix of residuals")
+```
+
+
+
+```{R}
+
+```
+
+
+
+```{R}
+
+```
+
+
+```{R}
+
+```
+
+
+```{R}
+
+```
+
+```{R}
+
+```
+
+
+```{R}
+
+```
+
+
+```{R}
+
+```
+
+
+
+```{R}
+
+```
